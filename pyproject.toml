@@ -9,13 +9,13 @@ description = "CLI утилита для агрегации логов из ра
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Naumov AO" }]
-license = { text = "AGPL-3.0" }
+license = { file = "LICENSE" }
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: AGPL-3.0 License",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: System :: Logging",
@@ -40,7 +40,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["log_collector", "log_collector*"]
+include = ["log_collector*"]
 namespaces = false
 
 [tool.setuptools.package-data]
@@ -48,7 +48,7 @@ log_collector = ["py.typed"]
 
 [tool.black]
 line-length = 100
-target-version = ['py311']
+target-version = ["py311"]
 
 [tool.isort]
 profile = "black"
