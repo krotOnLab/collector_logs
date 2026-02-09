@@ -5,7 +5,7 @@ import sys
 from datetime import datetime, time
 from pathlib import Path
 
-from collector_logs.log_collector.utils import (
+from log_collector.utils import (
     mb_to_bytes,
     parse_relative_time,
 )

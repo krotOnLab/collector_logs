@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-from collector_logs.log_collector.utils import extract_instance_id
+from log_collector.utils import extract_instance_id
 
 
 class LogFileFinder:

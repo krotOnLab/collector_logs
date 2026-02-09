@@ -2,10 +2,10 @@
 
 import sys
 
-from collector_logs.log_collector.cli import CLIArguments, parse_cli_args
-from collector_logs.log_collector.filesystem import LogFileFinder
-from collector_logs.log_collector.formatter import LogFormatter
-from collector_logs.log_collector.log_parser import LogEntry, LogParser
+from log_collector.cli import CLIArguments, parse_cli_args
+from log_collector.filesystem import LogFileFinder
+from log_collector.formatter import LogFormatter
+from log_collector.log_parser import LogEntry, LogParser
 
 
 class LogCollector:

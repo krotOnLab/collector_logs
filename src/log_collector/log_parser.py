@@ -4,7 +4,7 @@ from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
 
-from collector_logs.log_collector.utils import is_log_line_start
+from log_collector.utils import is_log_line_start
 
 
 class LogEntry:

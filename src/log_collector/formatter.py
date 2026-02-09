@@ -1,6 +1,6 @@
 """Модуль для форматирования результатов сбора логов в читаемый вид."""
 
-from collector_logs.log_collector.log_parser import LogEntry
+from log_collector.log_parser import LogEntry
 
 
 class LogFormatter:
