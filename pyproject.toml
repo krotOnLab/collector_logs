@@ -35,10 +35,16 @@ dev = [
     "flake8>=6.0"
 ]
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["log_collector*"]
+where = ["src"]
+include = ["log_collector", "log_collector*"]
 namespaces = false
+
+[tool.setuptools.package-data]
+log_collector = ["py.typed"]
 
 [tool.black]
 line-length = 100
