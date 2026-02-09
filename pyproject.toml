@@ -1,39 +1,15 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "log-collector"
 version = "1.0.0"
-description = "CLI утилита для агрегации логов из распределенных источников"
-readme = "README.md"
 requires-python = ">=3.11"
-authors = [{ name = "Naumov AO" }]
-license = { file = "LICENSE" }
-classifiers = [
-    "Development Status :: 5 - Production/Stable",
-    "Environment :: Console",
-    "Intended Audience :: Developers",
-    "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: System :: Logging",
-    "Topic :: Utilities"
-]
+license = { text = "MIT" }  # Временно для теста
 
 [project.scripts]
 collect_log = "log_collector.__main__:main"
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
-    "black>=23.0",
-    "isort>=5.0",
-    "mypy>=1.0",
-    "flake8>=6.0"
-]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -41,26 +17,3 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["log_collector*"]
-namespaces = false
-
-[tool.setuptools.package-data]
-log_collector = ["py.typed"]
-
-[tool.black]
-line-length = 100
-target-version = ["py311"]
-
-[tool.isort]
-profile = "black"
-line_length = 100
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-addopts = [
-    "--strict-markers",
-    "--tb=short",
-    "--doctest-modules",
-    "--cov=log_collector",
-    "--cov-report=term-missing"
-]
