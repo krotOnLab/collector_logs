@@ -1,5 +1,6 @@
 """Модуль для парсинга содержимого лог-файлов и фильтрации записей по времени."""
 
+import sys
 from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
@@ -37,16 +38,19 @@ class LogParser:
     - Фильтрацию записей по временному диапазону
     """
     
-    def __init__(self, start_time: datetime) -> None:
+    def __init__(self, start_time: datetime, end_time: datetime | None = None) -> None:
         """
-        Инициализирует парсер с указанием начального времени фильтрации.
+        Инициализирует парсер с временным диапазоном.
         
         Parameters
         ----------
         start_time : datetime
             Минимальная временная метка для включения записи в результат.
+        end_time : datetime | None
+            Максимальная временная метка (включительно). Если None — без ограничения.
         """
         self.start_time = start_time
+        self.end_time = end_time
     
     def parse_file(self, file_path: Path) -> Generator[LogEntry, None, None]:
         """
@@ -78,7 +82,7 @@ class LogParser:
                     if is_log_line_start(line):
                         # Сохраняем предыдущую запись, если она есть и проходит фильтр
                         if current_entry and current_timestamp:
-                            if current_timestamp >= self.start_time:
+                            if self._is_in_range(current_timestamp):
                                 yield LogEntry(current_timestamp, "".join(current_entry))
                         
                         # Начинаем новую запись
@@ -91,14 +95,22 @@ class LogParser:
                 
                 # Не забываем сохранить последнюю запись в файле
                 if current_entry and current_timestamp:
-                    if current_timestamp >= self.start_time:
+                    if self._is_in_range(current_timestamp):
                         yield LogEntry(current_timestamp, "".join(current_entry))
         
         except UnicodeDecodeError:
             # Пропускаем файлы с некорректной кодировкой, логируем предупреждение
-            print(f"Предупреждение: невозможно прочитать файл {file_path} (ошибка кодировки). Пропущен.")
+            print(f"Предупреждение: невозможно прочитать файл {file_path} (ошибка кодировки). Пропущен.", file=sys.stderr)
         except Exception as e:
-            print(f"Ошибка при чтении файла {file_path}: {e}. Пропущен.")
+            print(f"Ошибка при чтении файла {file_path}: {e}. Пропущен.", file=sys.stderr)
+    
+    def _is_in_range(self, timestamp: datetime) -> bool:
+        """Проверяет, попадает ли временная метка в диапазон фильтрации."""
+        if timestamp < self.start_time:
+            return False
+        if self.end_time is not None and timestamp > self.end_time:
+            return False
+        return True
     
     def _parse_timestamp(self, line: str) -> datetime:
         """

@@ -4,9 +4,27 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "log-collector"
-version = "1.0.0"
+version = "1.1.0"
+description = "CLI утилита для агрегации логов из распределенных источников"
+readme = "README.md"
+authors = [{ name = "Naumov AO" }]
 requires-python = ">=3.10"
 license = { text = "MIT" }  # Временно для теста
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Logging",
+    "Topic :: Utilities"
+]
+dependencies = [
+    "pyyaml>=6.0; python_version >= '3.10'",  # Опциональная зависимость для YAML
+]
 
 [project.scripts]
 collect_log = "log_collector.__main__:main"
@@ -17,3 +35,12 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["log_collector*"]
+namespaces = false
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.isort]
+profile = "black"
+line_length = 100

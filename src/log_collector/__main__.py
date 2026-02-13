@@ -1,6 +1,8 @@
 """Точка входа утилиты для сбора логов."""
 
 import sys
+from pathlib import Path
+import traceback as tb
 
 from log_collector.cli import CLIArguments, parse_cli_args
 from log_collector.filesystem import LogFileFinder
@@ -17,6 +19,7 @@ class LogCollector:
     - Парсинг и фильтрация записей
     - Форматирование результата
     - Запись в выходные файлы с учетом ограничений по размеру
+    - Поддержка конфигурационных файлов
     """
     
     def __init__(self, args: CLIArguments) -> None:
@@ -30,7 +33,7 @@ class LogCollector:
         """
         self.args = args
         self.finder = LogFileFinder(self.args.input_dir)
-        self.parser = LogParser(self.args.start_time)
+        self.parser = LogParser(self.args.start_time, end_time=self.args.end_time)
         self.formatter = LogFormatter()
     
     def collect(self) -> int:
@@ -72,14 +75,14 @@ class LogCollector:
             # 3. Форматируем и записываем результат
             self._write_output(instance_entries, total_entries)
             
+            source = f" (из {self.args.config_path})" if self.args.config_path else ""
             print(f"Успешно собрано {total_entries} записей от {len(instance_entries)} "
-                  f"экземпляров в {self.args.output_path}")
+                  f"экземпляров в {self.args.output_path}{source}")
             return 0
         
         except Exception as e:
             print(f"Ошибка при сборе логов: {e}", file=sys.stderr)
-            import traceback
-            traceback.print_exc()
+            print(tb.format_exc())
             return 1
     
     def _write_output(self, instance_entries: list[tuple[int, list[LogEntry]]], total_entries: int) -> None:
@@ -101,7 +104,7 @@ class LogCollector:
         # Создаем родительские директории для выходного файла
         self.args.output_path.parent.mkdir(parents=True, exist_ok=True)
         
-        if not self.args.max_file_size:
+        if self.args.max_file_size is None:
             # Простой случай: один файл
             self._write_to_single_file(instance_entries)
             return
