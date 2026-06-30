@@ -1,7 +1,7 @@
 """Точка входа утилиты для сбора логов."""
 
 import sys
-from pathlib import Path
+# from pathlib import Path
 import traceback as tb
 
 from log_collector.cli import CLIArguments, parse_cli_args
@@ -32,8 +32,11 @@ class LogCollector:
             Валидированные аргументы командной строки.
         """
         self.args = args
-        self.finder = LogFileFinder(self.args.input_dir)
-        self.parser = LogParser(self.args.start_time, end_time=self.args.end_time)
+        self.finder = LogFileFinder(
+            log_directory=self.args.input_dir,
+            instance_filter=self.args.instance_filter)
+        
+        self.parser = LogParser(self.args.start_time, end_time=self.args.end_time, timestamp_parser=self.args.timestamp_parser)
         self.formatter = LogFormatter()
     
     def collect(self) -> int:
@@ -45,6 +48,7 @@ class LogCollector:
         int
             Код возврата: 0 при успехе, 1 при ошибке.
         """
+        print(f"Конфиг: {self.args.__dict__}")
         try:
             # 1. Находим файлы логов для всех экземпляров
             instance_files = self.finder.find_log_files(self.args.level)

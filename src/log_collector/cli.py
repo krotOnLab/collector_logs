@@ -1,33 +1,42 @@
 """CLI интерфейс утилиты для сбора логов с поддержкой конфигурации."""
 
 import argparse
-import sys
-import traceback as tb
-from datetime import datetime, time
+# import sys
+# import traceback as tb
+from datetime import datetime, time#, date
 from pathlib import Path
 from typing import Any
 
-from log_collector.config import ConfigError, ConfigLoader
+from log_collector.config import  ConfigLoader #ConfigError,
 from log_collector.utils import (
     mb_to_bytes,
-    parse_relative_time,
+    # parse_relative_time,
+    parse_time_string,
 )
 
+from log_collector.timestamp_parser import TimestampParser, TimestampParserError
+from log_collector.instance_filter import InstanceFilter
 
 class CLIArguments:
     """
-    Обрабатывает и валидирует аргументы командной строки.
+    Валидированные аргументы после объединения CLI + конфиг + глобальных дефолтов.
     
-    Инкапсулирует логику объединения параметров и их валидации
+    Значения по умолчанию применяются ТОЛЬКО если параметр отсутствует везде.
     """
     
     LEVEL_ALIASES = {
         "A": "all",
         "WE": "warning",
         "ER": "error",
-        "all": "all",
-        "warning": "warning",
-        "error": "error",
+        "ALL": "all",
+        "WARNING": "warning",
+        "ERROR": "error",
+    }
+    
+    # Глобальные значения по умолчанию (применяются только если нет ни в CLI, ни в конфиге)
+    GLOBAL_DEFAULTS = {
+        "input": ".",
+        # "time": "00:00:00",
     }
     
     def __init__(self, args_dict: dict[str, Any]) -> None:
@@ -44,14 +53,69 @@ class CLIArguments:
         ValueError
             При некорректных значениях параметров.
         """
+        
+        # Применяем глобальные дефолты только для отсутствующих параметров
+        for key, default_value in self.GLOBAL_DEFAULTS.items():
+            if args_dict.get(key) is None:
+                args_dict[key] = default_value
+        
+        print(f"CLIArguments init - {args_dict}")
         self._validate_datetime_args(args_dict)
         self.start_time = self._determine_start_time(args_dict)
-        self.end_time = self._determine_end_time(args_dict)  # Для будущего шага 2
+        self.end_time = self._determine_end_time(args_dict)
+        self._validate_time_range()
         self.level = self._normalize_level(args_dict.get("level"))
         self.input_dir = Path(args_dict.get("input", "."))
         self.output_path = Path(args_dict.get("output", "collected_logs.txt"))
         self.max_file_size = self._parse_max_file_size(args_dict.get("mlength"))
         self.config_path = args_dict.get("config")  # Для информационных сообщений
+        
+        self.timestamp_parser = self._create_timestamp_parser(args_dict)
+        
+        # Создаём фильтр экземпляров
+        self.instance_filter = self._create_instance_filter(args_dict)
+    
+    def _create_timestamp_parser(self, args: dict[str, Any]) -> TimestampParser:
+        """Создаёт парсер временных меток на основе параметров."""
+        preset = args.get("timestamp_preset")
+        pattern = args.get("timestamp_pattern")
+        format_str = args.get("timestamp_format")
+        
+        try:
+            return TimestampParser(
+                pattern=pattern,
+                format_str=format_str,
+                preset=preset
+            )
+        except TimestampParserError as e:
+            raise ValueError(f"Ошибка конфигурации парсера временных меток: {e}") from e
+    
+    def _create_instance_filter(self, args: dict[str, Any]) -> InstanceFilter:
+        """Создаёт фильтр экземпляров на основе параметров."""
+        # Парсим списки экземпляров из строки (через запятую)
+        def parse_instance_list(value: str | None) -> list[int] | None:
+            if not value:
+                return None
+            try:
+                # Разделяем по запятым, удаляем пробелы, конвертируем в int
+                return [int(x.strip()) for x in value.split(",") if x.strip()]
+            except ValueError as e:
+                raise ValueError(
+                    f"Ошибка парсинга списка экземпляров '{value}': {e}. "
+                    f"Ожидается список чисел через запятую, например: '100,101,205'"
+                ) from e
+        
+        allow_instances = parse_instance_list(args.get("allow_instances"))
+        deny_instances = parse_instance_list(args.get("deny_instances"))
+        allow_regex = args.get("allow_regex")
+        deny_regex = args.get("deny_regex")
+        
+        return InstanceFilter(
+            allow_instances=allow_instances,
+            deny_instances=deny_instances,
+            allow_regex=allow_regex,
+            deny_regex=deny_regex
+        )
     
     def _validate_datetime_args(self, args: dict[str, Any]) -> None:
         """Валидирует комбинацию временных параметров."""
@@ -75,6 +139,7 @@ class CLIArguments:
     
     def _determine_start_time(self, args: dict[str, Any]) -> datetime:
         """Определяет начальное время фильтрации на основе аргументов."""
+        # Случай 1: комбинированный параметр datetime
         if args.get("datetime"):
             # Формат: %Y-%m-%d_%H:%M:%S
             try:
@@ -85,96 +150,100 @@ class CLIArguments:
                     f"Ожидается формат: ГГГГ-ММ-ДД_ЧЧ:ММ:СС"
                 ) from e
         
-        # Используем --date (обязательный) и --time (опциональный)
+        # Случай 2: раздельные параметры дата + время
         try:
-            base_date = datetime.strptime(args["date"], "%Y-%m-%d")
+            base_date = datetime.strptime(args["date"], "%Y-%m-%d").date()
         except ValueError as e:
             raise ValueError(
                 f"Некорректный формат --date: '{args.get('date')}'. "
                 f"Ожидается формат: ГГГГ-ММ-ДД"
             ) from e
         
-        time_str = args.get("time")
-        # Если время не указано, используем начало дня
-        if not time_str:
-            return datetime.combine(base_date, time(0, 0, 0))
+        time_str = args.get("time", "00:00:00")
         
         # Парсим время: сначала пробуем абсолютный формат %H:%M:%S
         
-        time_value = self._parse_time_argument(time_str, base_date)
-        return datetime.combine(base_date, time_value)
+        time_value, is_relative = parse_time_string(time_str, base_date)
+        
+        if is_relative and not isinstance(time_value, time):
+            # Относительное время возвращает полную дату-время — используем как есть
+            return time_value
+        else:
+            # Абсолютное время комбинируем с датой из --date
+            
+            return datetime.combine(base_date, time_value) if not isinstance(time_value, datetime) else time_value
     
     def _determine_end_time(self, args: dict[str, Any]) -> datetime | None:
         """
-        Определяет конечное время фильтрации (пока всегда None для шага 1).
+        Определяет конечное время фильтрации.
         
-        В будущем (шаг 2) будет поддерживать --end-datetime, --end-date + --end-time.
+        Если не задано — возвращаем None (фильтрация до конца лога).
         """
-        return None  # Для шага 1 всегда фильтруем до текущего момента
-    
-    def _parse_time_argument(self, time_str: str, base_date: datetime) -> time:
-        """
-        Парсит аргумент времени из строки.
+        # Проверяем комбинированный параметр
+        if args.get("end_datetime"):
+            try:
+                return datetime.strptime(args["end_datetime"], "%Y-%m-%d_%H:%M:%S")
+            except ValueError as e:
+                raise ValueError(
+                    f"Некорректный формат --end-datetime: '{args['end_datetime']}'. "
+                    f"Ожидается: ГГГГ-ММ-ДД_ЧЧ:ММ:СС"
+                ) from e
         
-        Поддерживает:
-        - Абсолютное время: "09:00:00", "9:00", "9" → 09:00:00
-        - Относительное время: "10 min ago", "9 hours"
+        # Проверяем раздельные параметры даты и времени
+        end_date_str = args.get("end_date")
+        end_time_str = args.get("end_time")
         
-        Parameters
-        ----------
-        time_str : str
-            Строка с временем.
-        base_date : datetime.date
-            Базовая дата для вычисления относительного времени.
+        if not end_date_str and not end_time_str:
+            return None  # Не задано конечное время
         
-        Returns
-        -------
-        datetime.time
-            Распарсенное время.
-        
-        Raises
-        ------
-        ValueError
-            Если формат времени не распознан.
-        """
-        time_str = time_str.strip()
-        
-        # 1. Пробуем абсолютный формат %H:%M:%S (гибкий парсинг)
-        try:
-            # Поддерживаем форматы: "9", "9:00", "09:00:00"
-            if ":" not in time_str:
-                # Только часы
-                hour = int(time_str)
-                return time(hour=hour, minute=0, second=0)
-            elif time_str.count(":") == 1:
-                # Часы:минуты
-                hour, minute = map(int, time_str.split(":"))
-                return time(hour=hour, minute=minute, second=0)
+        # if not end_date_str:
+        #     raise ValueError(
+        #         "Параметр --end-time требует указания --end-date"
+        #     )
+        if end_time_str and not end_date_str:
+            # Пробуем взять дату из начальных параметров
+            if args.get("date"):
+                end_date_str = args["date"]
+            elif args.get("datetime"):
+                # Извлекаем дату из строки datetime (формат: "ГГГГ-ММ-ДД_ЧЧ:ММ:СС")
+                try:
+                    date_part = args["datetime"].split("_")[0]
+                    # Валидируем формат даты
+                    datetime.strptime(date_part, "%Y-%m-%d")
+                    end_date_str = date_part
+                except (ValueError, IndexError):
+                    # Если не удалось извлечь, используем текущую дату
+                    end_date_str = datetime.now().strftime("%Y-%m-%d")
             else:
-                # Часы:минуты:секунды
-                hour, minute, second = map(int, time_str.split(":"))
-                return time(hour=hour, minute=minute, second=second)
-        except (ValueError, AttributeError):
-            pass  # Продолжаем попытки парсинга
+                # Если начальная дата не указана — используем текущую дату
+                end_date_str = datetime.now().strftime("%Y-%m-%d")
         
-        # 2. Пробуем относительное время
+        # Парсим дату окончания
         try:
-            now = datetime.now()
-            relative_dt = parse_relative_time(time_str, now)
-            # Применяем время относительного результата к базовой дате
-            return time(
-                hour=relative_dt.hour,
-                minute=relative_dt.minute,
-                second=relative_dt.second,
-                microsecond=relative_dt.microsecond
-            )
-        except ValueError:
-            pass
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        except ValueError as e:
+            raise ValueError(
+                f"Некорректный формат --end-date: '{end_date_str}'. "
+                f"Ожидается: ГГГГ-ММ-ДД"
+            ) from e
         
-        raise ValueError(
-            f"Некорректный формат времени: '{time_str}'. "
-            f"Поддерживаются форматы: ЧЧ:ММ:СС, ЧЧ:ММ, ЧЧ, 'X min ago', 'X hours'"
-        )
+        # Если время не указано — используем конец дня (23:59:59.999999)
+        if not end_time_str:
+            return datetime.combine(end_date, time(23, 59, 59, 999999))
+        
+        end_time_value, is_relative = parse_time_string(end_time_str, base_date=end_date)
+        if is_relative and not isinstance(end_time_value, time):
+            return end_time_value
+        else:
+            return datetime.combine(end_date, end_time_value) if not isinstance(end_time_value, datetime) else end_time_value
+
+    def _validate_time_range(self) -> None:
+        """Валидирует корректность временного диапазона."""
+        if self.end_time and self.end_time < self.start_time:
+            raise ValueError(
+                f"Конечное время ({self.end_time}) раньше начального ({self.start_time}). "
+                f"Временной диапазон должен быть корректным: начало <= конец."
+            )
     
     def _normalize_level(self, level_arg: str | None) -> str:
         """Нормализует уровень логов к каноническому виду."""
@@ -210,7 +279,8 @@ def setup_argument_parser() -> argparse.ArgumentParser:
                "  collect_log --date 2026-02-09 --time 09:00:00 --level error -o errors.txt\n"
                "  collect_log -c config.yaml\n"
                "  collect_log -c config.json --date 2026-02-10  # переопределение из CLI"
-               "  collect_log --datetime 2026-02-09_09:00:00 -l ER -o errors/errors_09.txt",
+               "  collect_log --datetime 2026-02-09_09:00:00 -l ER -o errors/errors_09.txt"
+               "  collect_log -c config.yaml --end-date 2026-02-10  # переопределение из CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
@@ -222,19 +292,51 @@ def setup_argument_parser() -> argparse.ArgumentParser:
         help="Путь к конфигурационному файлу (JSON или YAML)"
     )
     
-    # Временные параметры (взаимоисключающие группы)
-    time_group = parser.add_argument_group("временные параметры (обязательно указать один из вариантов)")
-    time_group.add_argument(
+    # Временные параметры — начало диапазона
+    start_group = parser.add_argument_group("начало временного диапазона (обязательно)")
+    start_group.add_argument(
         "--datetime", "-dt",
-        help="Комбинированная дата и время в формате ГГГГ-ММ-ДД_ЧЧ:ММ:СС"
+        help="Дата и время начала в формате ГГГГ-ММ-ДД_ЧЧ:ММ:СС"
     )
-    time_group.add_argument(
+    start_group.add_argument(
         "--date", "-d",
-        help="Дата в формате ГГГГ-ММ-ДД (время по умолчанию 00:00:00)"
+        help="Дата начала в формате ГГГГ-ММ-ДД (время по умолчанию 00:00:00)"
     )
-    time_group.add_argument(
+    start_group.add_argument(
         "--time", "-t",
-        help="Время в формате ЧЧ:ММ:СС или относительное ('10 min ago', '9 hours')"
+        help="Время начала в формате ЧЧ[:ММ[:СС]] или относительное ('10 min ago'). По умолчанию: 00:00:00"
+    )
+    
+    # Временные параметры — конец диапазона
+    end_group = parser.add_argument_group("конец временного диапазона (опционально)")
+    end_group.add_argument(
+        "--end-datetime", "-edt",
+        help="Дата и время окончания в формате ГГГГ-ММ-ДД_ЧЧ:ММ:СС"
+    )
+    end_group.add_argument(
+        "--end-date", "-ed",
+        help="Дата окончания в формате ГГГГ-ММ-ДД"
+    )
+    end_group.add_argument(
+        "--end-time", "-et",
+        help="Время окончания в формате ЧЧ[:ММ[:СС]] или относительное ('10 min ago'). "
+             "Если указан только --end-date, время устанавливается в 23:59:59.999999"
+    )
+    
+    # Настройка формата временной метки
+    timestamp_group = parser.add_argument_group("формат временной метки (опционально)")
+    timestamp_group.add_argument(
+        "--timestamp-preset",
+        choices=["default", "syslog", "iso8601", "nginx", "rfc3339"],
+        help="Предустановленный профиль формата временной метки"
+    )
+    timestamp_group.add_argument(
+        "--timestamp-pattern",
+        help="Регулярное выражение для обнаружения начала записи в логе"
+    )
+    timestamp_group.add_argument(
+        "--timestamp-format",
+        help="Формат даты/времени для парсинга (strftime). Пример: '%%Y-%%m-%%d %%H:%%M:%%S,%%f'"
     )
     
     # Параметры фильтрации
@@ -244,10 +346,29 @@ def setup_argument_parser() -> argparse.ArgumentParser:
         help="Уровень логов: all (A), warning (WE), error (ER)"
     )
     
+    # Фильтрация экземпляров
+    filter_group = parser.add_argument_group("фильтрация экземпляров (опционально)")
+    filter_group.add_argument(
+        "--allow-instances",
+        help="Список разрешённых экземпляров через запятую (например: 100,101,205)"
+    )
+    filter_group.add_argument(
+        "--deny-instances",
+        help="Список запрещённых экземпляров через запятую (например: 500,501)"
+    )
+    filter_group.add_argument(
+        "--allow-regex",
+        help="Регулярное выражение для разрешённых экземпляров (проверяется по ID)"
+    )
+    filter_group.add_argument(
+        "--deny-regex",
+        help="Регулярное выражение для запрещённых экземпляров (проверяется по ID)"
+    )
+    
     # Пути ввода/вывода
     parser.add_argument(
         "--input", "-i",
-        default=".",
+        type=Path,
         help="Путь к директории с логами (по умолчанию текущая директория)"
     )
     parser.add_argument(
@@ -267,7 +388,7 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version="log_collector 1.0.0"
+        version="log_collector 1.1.0"
     )
     
     return parser
@@ -275,57 +396,35 @@ def setup_argument_parser() -> argparse.ArgumentParser:
 
 def parse_cli_args() -> CLIArguments:
     """
-    Парсит аргументы командной строки с поддержкой конфигурации.
+    Парсит аргументы с корректной семантикой приоритетов:
+        CLI (явно указано) > конфигурация > глобальные значения по умолчанию
     
-    Returns
-    -------
-    CLIArguments
-        Валидированные и объединённые аргументы.
-    
-    Raises
-    ------
-    SystemExit
-        При ошибках парсинга или валидации.
+    Алгоритм:
+        1. Первый парсинг: извлекаем только --config
+        2. Загружаем конфигурацию
+        3. Второй парсинг: устанавливаем значения из конфига как дефолты через set_defaults()
+        4. Применяем глобальные дефолты только для отсутствующих параметров
     """
-    # Сначала парсим только --config для загрузки конфига
+    # Шаг 1: Парсим только --config для загрузки конфигурации
     pre_parser = argparse.ArgumentParser(add_help=False)
     pre_parser.add_argument("--config", "-c", type=Path, required=False)
-    pre_args, _ = pre_parser.parse_known_args()
+    config_args, remaining_args = pre_parser.parse_known_args()
     
-    # Загружаем конфиг, если указан
-    config_loader = ConfigLoader(pre_args.config) if pre_args.config else ConfigLoader()
+    # Шаг 2: Загружаем конфигурацию, если указан путь
+    config_loader = ConfigLoader(config_args.config) if config_args.config else ConfigLoader()
     
-    # Теперь парсим все аргументы
+    # Шаг 3: Создаём основной парсер и устанавливаем дефолты ИЗ КОНФИГА
     parser = setup_argument_parser()
-    cli_namespace = parser.parse_args()
     
-    # Преобразуем Namespace в словарь для объединения
-    cli_dict = {
-        k: v for k, v in vars(cli_namespace).items()
-        if v is not None or k in ("input", "config")  # сохраняем пустые пути
-    }
+    # Критически важный шаг: значения из конфига становятся дефолтами,
+    # но будут перекрыты любым явным указанием в CLI
+    if config_loader.has_config:
+        parser.set_defaults(**config_loader.raw_config)
     
-    # Объединяем с конфигом
-    try:
-        merged_args = config_loader.get_merged_args(cli_dict)
-    except ConfigError as e:
-        print(f"Ошибка конфигурации: {e}", file=sys.stderr)
-        sys.exit(1)
+    # Шаг 4: Парсим оставшиеся аргументы (всё кроме --config)
+    args = parser.parse_args(remaining_args)
+    args_dict = vars(args)
     
-    # Валидация и создание объекта аргументов
-    try:
-        return CLIArguments(merged_args)
-    except ValueError as e:
-        print(f"Ошибка валидации аргументов: {e}", file=sys.stderr)
-        
-        # Помощь при отсутствии обязательных параметров
-        if "обязательно" in str(e).lower() or "required" in str(e).lower():
-            print("\nПодсказка: укажите параметры через CLI или в конфигурационном файле.", file=sys.stderr)
-            if config_loader.config_path:
-                print(f"Проверьте конфигурационный файл: {config_loader.config_path}", file=sys.stderr)
-                
-        sys.exit(1)
-    except Exception as e:
-        print(f"Неожиданная ошибка при обработке аргументов: {e}", file=sys.stderr)
-        print(tb.format_exc())
-        sys.exit(1)
+    # Шаг 5: Применяем ГЛОБАЛЬНЫЕ дефолты только для параметров, отсутствующих везде
+    # (например, 'input' будет "." только если не задан ни в CLI, ни в конфиге)
+    return CLIArguments(args_dict)

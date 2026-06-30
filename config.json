@@ -1,0 +1,8 @@
+{
+  "date": "2026-02-13",
+  "time": "10 min ago",
+  "level": "warning",
+  "input": "E:\\temp\\test_logs",
+  "output": "warning_logs_1302_10min.log",
+  "mlength": 500
+} 

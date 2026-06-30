@@ -5,7 +5,8 @@ from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
 
-from log_collector.utils import is_log_line_start
+# from log_collector.utils import is_log_line_start
+from log_collector.timestamp_parser import TimestampParser, TimestampParserError
 
 
 class LogEntry:
@@ -30,15 +31,16 @@ class LogEntry:
 
 class LogParser:
     """
-    Парсит лог-файлы и извлекает записи с фильтрацией по времени.
+    Парсит лог-файлы и извлекает записи с фильтрацией по временному диапазону.
     
-    Отвечает за:
-    - Чтение файлов с корректной обработкой многострочных записей
-    - Парсинг временных меток
-    - Фильтрацию записей по временному диапазону
+    Поддерживает многострочные записи (трейсбеки) и фильтрацию по диапазону
+    [start_time, end_time]. Если end_time не задан — фильтрация до конца лога.
     """
     
-    def __init__(self, start_time: datetime, end_time: datetime | None = None) -> None:
+    def __init__(self, 
+                 start_time: datetime, 
+                 end_time: datetime | None = None,
+                 timestamp_parser: TimestampParser | None = None) -> None:
         """
         Инициализирует парсер с временным диапазоном.
         
@@ -51,10 +53,11 @@ class LogParser:
         """
         self.start_time = start_time
         self.end_time = end_time
+        self.timestamp_parser=timestamp_parser
     
     def parse_file(self, file_path: Path) -> Generator[LogEntry, None, None]:
         """
-        Парсит лог-файл и возвращает записи, удовлетворяющие временному фильтру.
+        Парсит лог-файл и возвращает записи в заданном временном диапазоне.
         
         Parameters
         ----------
@@ -64,29 +67,38 @@ class LogParser:
         Yields
         ------
         LogEntry
-            Записи лога, начиная с указанного времени.
+            Записи лога, попадающие в диапазон [start_time, end_time].
         
         Notes
         -----
-        Многострочные записи (например, трейсбеки) обрабатываются корректно:
-        запись продолжается до тех пор, пока не встретится новая строка
-        с временной меткой или не закончится файл.
+        Многострочные записи обрабатываются корректно: запись продолжается до
+        следующей строки с временной меткой или конца файла.
         """
         current_entry: list[str] = []
         current_timestamp: datetime | None = None
         
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, "r", encoding="utf-8-sig") as f:
                 for line in f:
                     # Проверяем, начинается ли строка с временной метки
-                    if is_log_line_start(line):
+                    if self.timestamp_parser is not None and self.timestamp_parser.is_line_start(line):
                         # Сохраняем предыдущую запись, если она есть и проходит фильтр
                         if current_entry and current_timestamp:
                             if self._is_in_range(current_timestamp):
                                 yield LogEntry(current_timestamp, "".join(current_entry))
                         
                         # Начинаем новую запись
-                        current_timestamp = self._parse_timestamp(line)
+                        try:
+                            current_timestamp = self.timestamp_parser.parse_timestamp(line)
+                        except TimestampParserError as e:
+                            # Пропускаем строку с некорректной временной меткой
+                            print(
+                                f"Предупреждение в {file_path.name}: {e}. Строка пропущена.",
+                                file=sys.stderr
+                            )
+                            current_entry = []
+                            current_timestamp = None
+                            continue
                         current_entry = [line]
                     else:
                         # Продолжение текущей записи (трейсбек, дополнительные данные)
@@ -112,28 +124,28 @@ class LogParser:
             return False
         return True
     
-    def _parse_timestamp(self, line: str) -> datetime:
-        """
-        Извлекает временную метку из первой строки лога.
+    # def _parse_timestamp(self, line: str) -> datetime:
+    #     """
+    #     Извлекает временную метку из первой строки лога.
         
-        Parameters
-        ----------
-        line : str
-            Первая строка записи лога.
+    #     Parameters
+    #     ----------
+    #     line : str
+    #         Первая строка записи лога.
         
-        Returns
-        -------
-        datetime
-            Распарсенная временная метка.
+    #     Returns
+    #     -------
+    #     datetime
+    #         Распарсенная временная метка.
         
-        Raises
-        ------
-        ValueError
-            Если формат временной метки некорректен.
-        """
-        # Формат: "2026-02-09 09:23:04,623"
-        try:
-            date_str = line[:23]  # "2026-02-09 09:23:04,623"
-            return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S,%f")
-        except (ValueError, IndexError) as e:
-            raise ValueError(f"Некорректный формат временной метки в строке: {line[:30]}...") from e
+    #     Raises
+    #     ------
+    #     ValueError
+    #         Если формат временной метки некорректен.
+    #     """
+    #     # Формат: "2026-02-09 09:23:04,623"
+    #     try:
+    #         date_str = line[:23]  # "2026-02-09 09:23:04,623"
+    #         return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S,%f")
+    #     except (ValueError, IndexError) as e:
+    #         raise ValueError(f"Некорректный формат временной метки в строке: {line[:30]}...") from e

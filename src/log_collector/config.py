@@ -92,33 +92,41 @@ class ConfigLoader:
             raise ConfigError(f"Ошибка парсинга конфигурации: {e}") from e
         except Exception as e:
             raise ConfigError(f"Ошибка чтения конфигурации: {e}") from e
+        
+    # @property
+    # def has_config(self) -> bool:
+    #     return bool(self.raw_config)
     
-    def get_merged_args(self, cli_args: dict[str, Any]) -> dict[str, Any]:
-        """
-        Объединяет параметры из CLI и конфигурации.
+    # def get_merged_args(self, cli_args: dict[str, Any]) -> dict[str, Any]:
+    #     """
+    #     Объединяет параметры из CLI и конфигурации.
         
-        Параметры из CLI перекрывают значения из конфига, если они явно заданы (не None).
+    #     Параметры из CLI перекрывают значения из конфига, если они явно заданы (не None).
         
-        Parameters
-        ----------
-        cli_args : Dict[str, Any]
-            Словарь аргументов из командной строки.
+    #     Parameters
+    #     ----------
+    #     cli_args : Dict[str, Any]
+    #         Словарь аргументов из командной строки.
         
-        Returns
-        -------
-        Dict[str, Any]
-            Объединённые параметры.
-        """
-        # Копируем конфиг, чтобы не модифицировать оригинал
-        merged = self.raw_config.copy()
+    #     Returns
+    #     -------
+    #     Dict[str, Any]
+    #         Объединённые параметры.
+    #     """
+    #     # Копируем конфиг, чтобы не модифицировать оригинал
+    #     merged = self.raw_config.copy()
         
-        # CLI имеет приоритет над конфигом
-        for key, value in cli_args.items():
-            # Только явно заданные значения из CLI (не None и не пустая строка для путей)
-            if value is not None and value != "":
-                merged[key] = value
+    #     print(f"\nCONFIG_LOADER - get_merged_args - self.raw_config: {merged}")
         
-        return merged
+    #     # CLI имеет приоритет над конфигом
+    #     for key, value in cli_args.items():
+    #         # Только явно заданные значения из CLI (не None и не пустая строка для путей)
+    #         if value is not None and value != "":
+    #             merged[key] = value
+        
+    #     print(f"\nCONFIG_LOADER - get_merged_args - self.raw_config after replace: {merged}")
+        
+    #     return merged
     
     @property
     def has_config(self) -> bool:
